@@ -1,4 +1,5 @@
 ﻿using Common;
+using Common.Dto;
 using Common.Dto.Peloton;
 using Common.Observe;
 using Common.Service;
@@ -28,11 +29,15 @@ public class TcxConverter : Converter<XElement>
 		data.Save(path);
 	}
 
-	protected override async Task<XElement> ConvertInternalAsync(Workout workout, WorkoutSamples samples, UserData userData, Settings settings)
+	protected override async Task<XElement> ConvertInternalAsync(P2GWorkout workoutData, Settings settings)
 	{
 		using var tracing = Tracing.Trace($"{nameof(TcxConverter)}.{nameof(ConvertAsync)}")
 							.WithTag(TagKey.Format, FileFormat.Tcx.ToString())
-							.WithWorkoutId(workout.Id);
+							.WithWorkoutId(workoutData.Workout.Id);
+
+		var workout = workoutData.Workout;
+		var samples = workoutData.WorkoutSamples;
+		var userData = workoutData.UserData;
 
 		XNamespace ns1 = "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2";
 		XNamespace activityExtensions = "http://www.garmin.com/xmlschemas/ActivityExtension/v2";
@@ -48,7 +53,7 @@ public class TcxConverter : Converter<XElement>
 		var hrSummary = GetHeartRateSummary(samples);
 		var cadenceSummary = GetCadenceSummary(samples, GetGarminSport(workout));
 		var resistanceSummary = GetResistanceSummary(samples);
-		var deviceInfo = await GetDeviceInfoAsync(workout.Fitness_Discipline, settings);
+		var deviceInfo = await GetDeviceInfoAsync(workout);
 
 		var lx = new XElement(activityExtensions + "TPX");
 		lx.Add(new XElement(activityExtensions + "TotalPower", workout?.Total_Work));

@@ -32,51 +32,6 @@ namespace Conversion
 
 		private static readonly ILogger _logger = LogContext.ForClass<Converter<T>>();
 
-		private static readonly GarminDeviceInfo RowingDevice = new GarminDeviceInfo()
-		{
-			Name = "Epix", // Max 20 Chars
-			ProductID = GarminProduct.EpixGen2,
-			UnitId = 3413684246,
-			ManufacturerId = 1, // Garmin
-			Version = new GarminDeviceVersion()
-			{
-				VersionMajor = 10,
-				VersionMinor = 43,
-				BuildMajor = 0,
-				BuildMinor = 0,
-			}
-		};
-
-		private static readonly GarminDeviceInfo CyclingDevice = new GarminDeviceInfo()
-		{
-			Name = "TacxTrainingAppWin", // Max 20 Chars
-			ProductID = GarminProduct.TacxTrainingAppWin,
-			UnitId = 1,
-			ManufacturerId = 1, // Garmin
-			Version = new GarminDeviceVersion()
-			{
-				VersionMajor = 1,
-				VersionMinor = 30,
-				BuildMajor = 0,
-				BuildMinor = 0,
-			}
-		};
-
-		private static readonly GarminDeviceInfo DefaultDevice = new GarminDeviceInfo()
-		{
-			Name = "Forerunner 945", // Max 20 Chars
-			ProductID = GarminProduct.Fr945,
-			UnitId = 1,
-			ManufacturerId = 1, // Garmin
-			Version = new GarminDeviceVersion()
-			{
-				VersionMajor = 19,
-				VersionMinor = 2,
-				BuildMajor = 0,
-				BuildMinor = 0,
-			}
-		};
-
 		public static readonly float _metersPerMile = 1609.34f;
 
 		public FileFormat Format { get; init; }
@@ -92,7 +47,7 @@ namespace Conversion
 
 		protected abstract bool ShouldConvert(Format settings);
 
-		protected abstract Task<T> ConvertInternalAsync(Workout workout, WorkoutSamples workoutSamples, UserData userData, Settings settings);
+		protected abstract Task<T> ConvertInternalAsync(P2GWorkout workoutData, Settings settings);
 
 		protected abstract void Save(T data, string path);
 
@@ -113,17 +68,17 @@ namespace Conversion
 
 			// call internal convert method
 			T converted = default;
-			var workoutTitle = WorkoutHelper.GetUniqueTitle(workoutData.Workout);
+			var workoutTitle = WorkoutHelper.GetUniqueTitle(workoutData.Workout, settings.Format);
 			try
 			{
-				converted = await ConvertInternalAsync(workoutData.Workout, workoutData.WorkoutSamples, workoutData.UserData, settings);
+				converted = await ConvertInternalAsync(workoutData, settings);
 			}
 			catch (Exception e)
 			{
 				_logger.Error(e, "Failed to convert workout data to format {@Format} {@Workout}", Format, workoutTitle);
 				status.Result = ConversionResult.Failed;
 				status.ErrorMessage = $"Unknown error while trying to convert workout data for {workoutTitle} - {e.Message}";
-				tracing?.AddTag("excetpion.message", e.Message);
+				tracing?.AddTag("exception.message", e.Message);
 				tracing?.AddTag("exception.stacktrace", e.StackTrace);
 				tracing?.AddTag("convert.success", false);
 				tracing?.AddTag("convert.errormessage", status.ErrorMessage);
@@ -194,7 +149,7 @@ namespace Conversion
 
 				var backupDest = Path.Join(localSaveDir, $"{workoutTitle}.{formatString}");
 				_fileHandler.Copy(sourcePath, backupDest, overwrite: true);
-				_logger.Information("[@Format] Backed up file {@File}", Format, backupDest);
+				_logger.Information("[{@Format}] Backed up file {@File}", Format, backupDest);
 			}
 			catch (Exception e)
 			{
@@ -235,6 +190,19 @@ namespace Conversion
 				case DistanceUnit.FiveHundredMeters:
 					return (float)value / 500;
 				case DistanceUnit.Meters:
+				default:
+					return (float)value;
+			}
+		}
+
+		public static float ConvertWeightToKilograms(double value, string unit)
+		{
+			var weightUnit = UnitHelpers.GetWeightUnit(unit);
+			switch (weightUnit)
+			{
+				case WeightUnit.Pounds:
+					return (float)(value * 0.453592);
+				case WeightUnit.Kilograms:
 				default:
 					return (float)value;
 			}
@@ -550,19 +518,13 @@ namespace Conversion
 			return metric;
 		}
 
-		protected async Task<GarminDeviceInfo> GetDeviceInfoAsync(FitnessDiscipline sport, Settings settings)
+		protected async Task<GarminDeviceInfo> GetDeviceInfoAsync(Workout workout)
 		{
-			GarminDeviceInfo userProvidedDeviceInfo = await _settingsService.GetCustomDeviceInfoAsync(settings.Garmin.Email);
+			GarminDeviceInfo deviceInfo = await _settingsService.GetCustomDeviceInfoAsync(workout);
 
-			if (userProvidedDeviceInfo is object) return userProvidedDeviceInfo;
+			_logger.Debug("Using device: {@DeviceName}, {@DeviceProdId}, {@DeviceManufacturerId}, {@DeviceVersion}", deviceInfo?.Name, deviceInfo?.ProductID, deviceInfo?.ManufacturerId, deviceInfo?.Version);
 
-			if(sport == FitnessDiscipline.Cycling)
-				return CyclingDevice;
-
-			if (sport == FitnessDiscipline.Caesar)
-				return RowingDevice;
-
-			return DefaultDevice;
+			return deviceInfo;
 		}
 
 		protected ushort? GetCyclingFtp(Workout workout, UserData userData)
@@ -613,6 +575,7 @@ namespace Conversion
 				case FitnessDiscipline.Meditation:
 					return Sport.Training;
 				case FitnessDiscipline.Caesar:
+				case FitnessDiscipline.Caesar_Bootcamp:
 					return Sport.Rowing;
 				default:
 					return Sport.Invalid;

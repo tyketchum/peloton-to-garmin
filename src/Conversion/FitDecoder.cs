@@ -1,4 +1,4 @@
-﻿using Common;
+﻿using Common.Dto;
 using Common.Observe;
 using Dynastream.Fit;
 using Serilog;
@@ -87,6 +87,7 @@ namespace Conversion
 			mesgBroadcaster.SegmentLeaderboardEntryMesgEvent += Write;
 			mesgBroadcaster.SegmentPointMesgEvent += Write;
 			mesgBroadcaster.SessionMesgEvent += Write;
+			mesgBroadcaster.SetMesgEvent+= Write;
 			mesgBroadcaster.SlaveDeviceMesgEvent += Write;
 			mesgBroadcaster.SoftwareMesgEvent += Write;
 			mesgBroadcaster.SpeedZoneMesgEvent += Write;

@@ -11,6 +11,7 @@ using Prometheus;
 using Serilog;
 using System;
 using System.Collections.Generic;
+using System.Dynamic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -60,7 +61,7 @@ namespace Peloton
 			_failedCount = 0;
 		}
 
-		public static void ValidateConfig(Common.Peloton config)
+		public static void ValidateConfig(PelotonSettings config)
 		{
 			if (string.IsNullOrEmpty(config.Email))
 			{
@@ -273,35 +274,30 @@ namespace Peloton
 			var workout = await workoutTask;
 			var workoutSamples = await workoutSamplesTask;
 
-			return await BuildP2GWorkoutAsync(workoutId, workout, workoutSamples);
-		}
-
-		private async Task<P2GWorkout> BuildP2GWorkoutAsync(string workoutId, JObject workout, JObject workoutSamples)
-		{
-			using var tracing = Tracing.Trace($"{nameof(PelotonService)}.{nameof(BuildP2GWorkoutAsync)}")
-										.WithWorkoutId(workoutId);
-
-			dynamic data = new JObject();
-			data.Workout = workout;
-			data.WorkoutSamples = workoutSamples;
-
-			P2GWorkout deSerializedData = null;
-			try
+			var p2gWorkoutData = new P2GWorkout()
 			{
-				deSerializedData = JsonSerializer.Deserialize<P2GWorkout>(data.ToString(), new JsonSerializerOptions() { PropertyNameCaseInsensitive = true });
-				deSerializedData.Raw = data;
-			}
-			catch (Exception e)
+				Workout = workout,
+				WorkoutSamples = workoutSamples,
+			};
+
+			var classId = p2gWorkoutData?.Workout?.Ride?.Id;
+			if (!string.IsNullOrWhiteSpace(classId)
+				&& classId != "00000000000000000000000000000000")
 			{
-				_failedCount++;
-
-				var title = "workout_failed_to_deserialize_" + workoutId;
-				await SaveRawDataAsync(data, title);
-
-				_logger.Error("Failed to deserialize workout from Peloton. You can find the raw data from the workout here: {@FileName}", title, e);
+				try
+				{
+					var workoutSegments = await _pelotonApi.GetClassSegmentsAsync(classId);
+					p2gWorkoutData.Exercises = P2GWorkoutExerciseMapper.GetWorkoutExercises(p2gWorkoutData.Workout, workoutSegments);
+				} catch (Exception ex)
+				{
+					// Known issue: Peloton Gym Segment data doesn't live at the same route as the other workout data
+					// have not yet been able to find where this data lives, may need to wait until Peloton adds a better
+					// web experience for viewing these workout details
+					_logger.Error(ex, "Failed to load class segment data for classId: {@classId}", classId);
+				}
 			}
 
-			return deSerializedData;
+			return p2gWorkoutData;
 		}
 
 		private async Task SaveRawDataAsync(dynamic data, string workoutTitle)

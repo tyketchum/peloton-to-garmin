@@ -1,0 +1,45 @@
+# Strava to Garmin Sync Workflow
+# Syncs activities from Strava to Garmin Connect
+
+name: 🏃 Strava Sync Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      daysToSync:
+        description: 'Number of days to sync'
+        required: false
+        default: '7'
+        type: number
+  schedule:
+    - cron: '0 6 * * *'   # Midnight CST (6 AM UTC)
+    - cron: '0 18 * * *'  # Noon CST (6 PM UTC)
+
+jobs:
+  sync:
+    name: 🏃 Sync Strava to Garmin
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-strava.txt
+
+    - name: 🔄 Run Strava to Garmin sync
+      env:
+        STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+        STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+        STRAVA_REFRESH_TOKEN: ${{ secrets.STRAVA_REFRESH_TOKEN }}
+        GARMIN_EMAIL: ${{ secrets.P2G_GARMIN__EMAIL }}
+        GARMIN_PASSWORD: ${{ secrets.P2G_GARMIN__PASSWORD }}
+        DAYS_TO_SYNC: ${{ github.event.inputs.daysToSync || '7' }}
+      run: python strava_to_garmin_sync.py

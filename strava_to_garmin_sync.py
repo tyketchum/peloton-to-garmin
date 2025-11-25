@@ -114,33 +114,81 @@ def activity_exists_in_garmin(garmin, activity_name, activity_date):
         return False
 
 def convert_strava_to_tcx(activity, streams):
-    """Convert Strava activity data to TCX format"""
+    """Convert Strava activity data to TCX format with enhanced metrics"""
     if not streams or 'time' not in streams:
         return None
 
     # Build basic TCX structure
     start_time = datetime.strptime(activity['start_date'], '%Y-%m-%dT%H:%M:%SZ')
 
-    tcx = f"""<?xml version="1.0" encoding="UTF-8"?>
-<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
-  <Activities>
-    <Activity Sport="{get_sport_type(activity['type'])}">
-      <Id>{activity['start_date']}</Id>
-      <Lap StartTime="{activity['start_date']}">
-        <TotalTimeSeconds>{activity['elapsed_time']}</TotalTimeSeconds>
-        <DistanceMeters>{activity['distance']}</DistanceMeters>
-        <Calories>{activity.get('calories', 0)}</Calories>
-        <Intensity>Active</Intensity>
-        <TriggerMethod>Manual</TriggerMethod>
-        <Track>
-"""
-
-    # Add trackpoints
+    # Extract stream data
     time_data = streams.get('time', {}).get('data', [])
     latlng_data = streams.get('latlng', {}).get('data', [])
     altitude_data = streams.get('altitude', {}).get('data', [])
     heartrate_data = streams.get('heartrate', {}).get('data', [])
+    cadence_data = streams.get('cadence', {}).get('data', [])
+    watts_data = streams.get('watts', {}).get('data', [])
+    temp_data = streams.get('temp', {}).get('data', [])
 
+    # Calculate lap statistics
+    avg_hr = activity.get('average_heartrate', 0)
+    max_hr = activity.get('max_heartrate', 0)
+    avg_watts = activity.get('average_watts', 0)
+    max_watts = activity.get('max_watts', 0)
+    avg_cadence = activity.get('average_cadence', 0)
+    weighted_avg_watts = activity.get('weighted_average_watts', 0)
+
+    # Build activity name with more context
+    activity_notes = f"{activity['name']}"
+    if activity.get('description'):
+        activity_notes += f" - {activity['description']}"
+    if activity.get('gear_id'):
+        activity_notes += f" | Gear: {activity.get('gear_id')}"
+
+    tcx = f"""<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
+                        xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+  <Activities>
+    <Activity Sport="{get_sport_type(activity['type'])}">
+      <Id>{activity['start_date']}</Id>
+      <Notes>{activity_notes}</Notes>
+      <Lap StartTime="{activity['start_date']}">
+        <TotalTimeSeconds>{activity['elapsed_time']}</TotalTimeSeconds>
+        <DistanceMeters>{activity['distance']}</DistanceMeters>
+        <MaximumSpeed>{activity.get('max_speed', 0)}</MaximumSpeed>
+        <Calories>{activity.get('calories', 0)}</Calories>"""
+
+    # Add heart rate stats if available
+    if avg_hr:
+        tcx += f"""
+        <AverageHeartRateBpm><Value>{int(avg_hr)}</Value></AverageHeartRateBpm>
+        <MaximumHeartRateBpm><Value>{int(max_hr)}</Value></MaximumHeartRateBpm>"""
+
+    tcx += """
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Manual</TriggerMethod>"""
+
+    # Add extension data for power and cadence
+    if avg_watts or avg_cadence:
+        tcx += """
+        <Extensions>
+          <ns3:LX>"""
+        if avg_watts:
+            tcx += f"""
+            <ns3:AvgWatts>{int(avg_watts)}</ns3:AvgWatts>
+            <ns3:MaxWatts>{int(max_watts)}</ns3:MaxWatts>"""
+        if avg_cadence:
+            tcx += f"""
+            <ns3:AvgRunCadence>{int(avg_cadence)}</ns3:AvgRunCadence>"""
+        tcx += """
+          </ns3:LX>
+        </Extensions>"""
+
+    tcx += """
+        <Track>
+"""
+
+    # Add trackpoints with enhanced data
     for i, t in enumerate(time_data):
         point_time = start_time + timedelta(seconds=t)
         tcx += f"          <Trackpoint>\n"
@@ -157,7 +205,26 @@ def convert_strava_to_tcx(activity, streams):
             tcx += f"            <AltitudeMeters>{altitude_data[i]}</AltitudeMeters>\n"
 
         if i < len(heartrate_data):
-            tcx += f"            <HeartRateBpm><Value>{heartrate_data[i]}</Value></HeartRateBpm>\n"
+            tcx += f"            <HeartRateBpm><Value>{int(heartrate_data[i])}</Value></HeartRateBpm>\n"
+
+        # Add cadence if available
+        if i < len(cadence_data):
+            tcx += f"            <Cadence>{int(cadence_data[i])}</Cadence>\n"
+
+        # Add extensions for power and temperature
+        has_extensions = (i < len(watts_data)) or (i < len(temp_data))
+        if has_extensions:
+            tcx += "            <Extensions>\n"
+            tcx += "              <ns3:TPX>\n"
+
+            if i < len(watts_data):
+                tcx += f"                <ns3:Watts>{int(watts_data[i])}</ns3:Watts>\n"
+
+            if i < len(temp_data):
+                tcx += f"                <ns3:AirTemperature>{int(temp_data[i])}</ns3:AirTemperature>\n"
+
+            tcx += "              </ns3:TPX>\n"
+            tcx += "            </Extensions>\n"
 
         tcx += f"          </Trackpoint>\n"
 
